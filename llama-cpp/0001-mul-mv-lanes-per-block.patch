@@ -1,0 +1,33 @@
+--- a/ggml/src/ggml-metal/kernels/mul_mv.metal
++++ b/ggml/src/ggml-metal/kernels/mul_mv.metal
+@@ -257,7 +257,14 @@
+     float sumf[NR0] = {0.f};
+ 
+-    const short ix = (tiisg/(NW/NQ));
+-    const short il = (tiisg%(NW/NQ))*8;
++    // A block holds QK4_0 quants and one lane covers NQ of them, so QK4_0/NQ lanes
++    // cooperate on a block. Deriving that from NW only matches while NW == QK4_0;
++    // on a 64-wide simdgroup NW/NQ yields il = 16 and 24, which index past the end
++    // of the block. q8_0 and t_t already express this correctly - this path was
++    // missed. At NW == 32 the two forms are identical, so Apple is unaffected.
++    constexpr short NLB = QK4_0/NQ;   // lanes cooperating on one block
++    constexpr short NBL = NW/NLB;     // blocks advanced per simdgroup round
++
++    const short ix = tiisg/NLB;
++    const short il = (tiisg%NLB)*8;
+ 
+     //const int ib0 = sgitg*NQ + ix;
+     const int ib0 = ix;
+@@ -270,4 +277,4 @@
+     // each thread in a SIMD group deals with half a block.
+     //for (int ib = ib0; ib < nb; ib += NSG*NQ) {
+-    for (int ib = ib0; ib < nb; ib += NQ) {
++    for (int ib = ib0; ib < nb; ib += NBL) {
+         float sumy[2] = { 0.f, 0.f };
+@@ -287,5 +294,5 @@
+         }
+ 
+-        yb += QK4_0 * 16;
++        yb += QK4_0 * NBL;
+         //yb += NSG*NQ*QK4_0;
+     }

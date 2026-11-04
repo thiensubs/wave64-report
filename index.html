@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stable Diffusion on an RX 580: 4.19× faster, no blank images</title>
+
+<meta name="description" content="A width-32 clamp made every image pure white. Four kernel bugs later the same RX 580 renders 4.19× faster — measured, code included.">
+<meta name="theme-color" content="#0b0f14">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f14'/%3E%3Cg fill='%234ade80'%3E%3Crect x='5' y='9' width='3' height='14'/%3E%3Crect x='11' y='9' width='3' height='14'/%3E%3Crect x='17' y='9' width='3' height='14'/%3E%3Crect x='23' y='9' width='3' height='14'/%3E%3C/g%3E%3C/svg%3E">
+
+<meta property="og:type" content="article">
+<meta property="og:title" content="Stable Diffusion 2.1 on an RX 580: 4.19× faster, no more blank images">
+<meta property="og:description" content="A width-32 clamp made every image pure white. Four kernel bugs later it is 4.19× faster. Measured on real hardware, failures included.">
+<meta property="og:image" content="https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/">
+<link rel="canonical" href="https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/">
+<!-- The tgcloud copy is canonical: it is the one inside Telegram, and the one links
+     point at. A GitHub Pages copy of this file is a mirror, so it names this URL as
+     canonical rather than competing with it. -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Stable Diffusion 2.1 on an RX 580: 4.19× faster">
+<meta name="twitter:description" content="The width-32 clamp that produced blank images, four kernel bugs, and a 4.19× speedup — measured.">
+<meta name="twitter:image" content="https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/assets/og-card.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Stable Diffusion 2.1 on an AMD RX 580: 4.19× faster, and why it painted blank images",
+  "description": "A width-32 simdgroup clamp produced pure white images. Fixing it, four kernel bugs and a tiled SIMT GEMM made the same hardware 4.19× faster.",
+  "about": ["Stable Diffusion", "Metal", "AMD RX 580", "GPU kernels", "wave64"],
+  "image": "assets/og-card.png",
+  "isPartOf": { "@type": "CreativeWorkSeries", "name": "wave64" }
+}
+</script>
+<!--
+  ============================================================================
+  Support: two Ko-fi widgets (a button and a floating overlay). They load from
+  ko-fi.com. The report itself is self-contained and renders fine without them;
+  a plain ko-fi.com/thiensubs link is shown as a fallback.
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121922; --panel2:#0f1620; --line:#22303f;
+    --ink:#e6edf5; --dim:#93a4b8; --green:#4ade80; --red:#f87171;
+    --amber:#fbbf24; --blue:#60a5fa; --violet:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  a{color:var(--blue)}
+  .wrap{max-width:940px;margin:0 auto;padding:0 22px}
+  h1,h2,h3{line-height:1.22;letter-spacing:-0.015em}
+  h1{font-size:44px;margin:0 0 14px}
+  h2{font-size:29px;margin:0 0 8px}
+  h3{font-size:20px;margin:30px 0 8px}
+  p{margin:0 0 14px}
+  .dim{color:var(--dim)}
+  .small{font-size:14px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
+
+  /* ---------- hero ---------- */
+  header.hero{
+    padding:74px 0 40px;
+    background:
+      radial-gradient(900px 380px at 15% -10%, #14314a 0%, transparent 60%),
+      radial-gradient(700px 320px at 90% 0%, #2a1a3d 0%, transparent 55%);
+  }
+  .eyebrow{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:14px}
+  .lede{font-size:19px;color:#c7d5e5;max-width:44em}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:30px 0 26px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .stat .k{font-size:30px;font-weight:700;letter-spacing:-0.02em}
+  .stat .l{font-size:12.5px;color:var(--dim);margin-top:2px}
+  .stat.win .k{color:var(--green)}
+
+  /* ---------- support button ---------- */
+  .support{
+    display:inline-flex;align-items:center;gap:10px;
+    background:#f59273;
+    color:#1b1205;text-decoration:none;font-weight:700;
+    padding:13px 22px;border-radius:12px;border:0;
+    box-shadow:0 8px 24px rgba(245,146,115,.32);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .support:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(245,146,115,.42)}
+
+  /* ---------- layout ---------- */
+  nav.toc{
+    position:sticky;top:0;z-index:20;background:rgba(11,15,20,.88);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  }
+  nav.toc .wrap{display:flex;gap:18px;overflow-x:auto;padding:12px 22px}
+  nav.toc a{color:var(--dim);text-decoration:none;font-size:14px;white-space:nowrap}
+  nav.toc a:hover{color:var(--ink)}
+
+  section{padding:58px 0;border-bottom:1px solid var(--line)}
+  .tag{display:inline-block;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+       color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin-bottom:14px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin:16px 0}
+  .card h3{margin-top:0}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:820px){ .two{grid-template-columns:1fr} .stats{grid-template-columns:1fr 1fr} h1{font-size:34px} }
+
+  /* ---------- bars ---------- */
+  .bars{margin:18px 0 6px}
+  .bar-row{display:grid;grid-template-columns:190px 1fr 146px;gap:12px;align-items:center;margin:9px 0}
+  .bar-track{background:#0a1017;border:1px solid var(--line);border-radius:8px;height:26px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:7px 0 0 7px}
+  .bar-val{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim);font-size:13px;white-space:nowrap}
+  @media (max-width:720px){ .bar-row{grid-template-columns:120px 1fr 96px} }
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:0}
+  .ok{color:var(--green);font-weight:600}
+  .bad{color:var(--red);font-weight:600}
+
+  /* ---------- gallery ---------- */
+  .gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0}
+  @media (max-width:820px){ .gallery{grid-template-columns:1fr 1fr} }
+  figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  figure img{display:block;width:100%;height:auto;background:#000}
+  figcaption{padding:10px 12px;font-size:13px;color:var(--dim)}
+  figure.broken img{opacity:.92}
+
+  pre{background:#0a1017;border:1px solid var(--line);border-radius:12px;padding:15px 16px;overflow:auto;font-size:13px;line-height:1.55}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}
+  .kbd{background:#0a1017;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12.5px}
+
+  .callout{border-left:3px solid var(--amber);background:#1a1408;padding:14px 16px;border-radius:0 12px 12px 0;margin:16px 0}
+  .callout.good{border-color:var(--green);background:#0c1a12}
+  .callout.bad{border-color:var(--red);background:#1b0f10}
+  .callout p:last-child{margin-bottom:0}
+
+  ul{margin:0 0 14px;padding-left:22px}
+  li{margin:5px 0}
+  footer{padding:44px 0 70px;color:var(--dim);font-size:14px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Chapter 1 of a series · RX 580 · Metal · wave64</div>
+    <h1>We made Stable Diffusion 2.1 run on an AMD RX&nbsp;580 — 4.19× faster than it started, and we found out why it was painting blank pictures.</h1>
+    <p class="lede">
+      This is a story about a graphics card that was never supposed to work, a bug that turned
+      every image pure white, and the two changes that made it fast. It is written so you can
+      follow it without knowing what a shader is — the deep detail is in the appendices.
+    </p>
+    <p class="lede" style="font-size:16.5px;color:var(--dim);border-left:2px solid var(--line);padding-left:14px">
+      <strong style="color:var(--ink)">Chapter 1 — Stable Diffusion.</strong> This page. Finished,
+      measured, reproducible.<br>
+      <strong style="color:var(--ink)">Chapter 2 — llama.cpp.</strong> The same defect kept
+      breaking our own runs on this card. Patch written, upstream reproduction next.
+    </p>
+
+    <div class="stats">
+      <div class="stat win"><div class="k">4.19×</div><div class="l">faster, measured</div></div>
+      <div class="stat"><div class="k" style="font-size:25px;white-space:nowrap">16.26&thinsp;→&thinsp;3.88</div><div class="l">seconds per step</div></div>
+      <div class="stat"><div class="k">325 s → 78 s</div><div class="l">one 512×512 image</div></div>
+      <div class="stat"><div class="k" style="font-size:25px;white-space:nowrap">27 &rarr; 6.5</div><div class="l">Wh of electricity per image</div></div>
+    </div>
+
+    <div class="support-row" id="kofi-slot">
+      <script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script>
+      <script type='text/javascript'>kofiwidget2.init('Keep the AI cooking', '#f59273', 'R0C02A133C');kofiwidget2.draw();</script>
+      <a class="support" id="support-fallback" href="https://ko-fi.com/thiensubs" target="_blank" rel="noopener">
+        Keep the AI cooking
+      </a>
+      <a href="https://ko-fi.com/thiensubs" target="_blank" rel="noopener"
+         style="margin-left:14px;font-size:13.5px">ko-fi.com/thiensubs</a>
+      <div style="margin:12px 0 0;font-size:13.5px;color:var(--dim)">
+        If this saved you a week, that is what the button is for.
+      </div>
+      <script>
+        // The plain button above is the default, so it works with scripts blocked, offline,
+        // and in previews. If the branded Ko-fi widget did load, hide the duplicate.
+        window.addEventListener('load', function () {
+          var slot = document.getElementById('kofi-slot');
+          var fb   = document.getElementById('support-fallback');
+          if (fb && slot && slot.querySelector('img, iframe')) fb.style.display = 'none';
+        });
+      </script>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#part1">1 · The win</a>
+    <a href="#part2">2 · The problem</a>
+    <a href="#part3">3 · How it was fixed</a>
+    <a href="#part4">4 · Chapter 2</a>
+    <a href="#appendix">Appendix</a>
+  </div>
+</nav>
+
+<main>
+
+<!-- ================= PART 1 ================= -->
+<section id="part1">
+  <div class="wrap">
+    <div class="tag">Part 1 · The outcome</div>
+    <h2>What you get</h2>
+    <p>
+      A 512×512 picture, 20 steps, on one eight-year-old graphics card that normally cannot run
+      this software at all. Before: <strong>five minutes and twenty-five seconds</strong>. Now:
+      <strong>one minute and eighteen seconds</strong>. Same card, same model, same code —
+      different instructions inside it.
+    </p>
+
+    <div class="bars">
+      <div class="bar-row">
+        <div class="dim small">When we started</div>
+        <div class="bar-track"><div class="bar-fill" style="width:100%;background:#f87171"></div></div>
+        <div class="bar-val">325.1 s · 16.26 s/it</div>
+      </div>
+      <div class="bar-row">
+        <div class="dim small">+ tiled matmul</div>
+        <div class="bar-track"><div class="bar-fill" style="width:47.8%;background:#fb923c"></div></div>
+        <div class="bar-val">155.6 s · 7.78 s/it</div>
+      </div>
+      <div class="bar-row">
+        <div class="dim small">+ convolutions tiled</div>
+        <div class="bar-track"><div class="bar-fill" style="width:27.4%;background:#fbbf24"></div></div>
+        <div class="bar-val">89.1 s · 4.45 s/it</div>
+      </div>
+      <div class="bar-row">
+        <div class="dim small">+ register blocking</div>
+        <div class="bar-track"><div class="bar-fill" style="width:23.9%;background:#4ade80"></div></div>
+        <div class="bar-val">77.6 s · 3.88 s/it</div>
+      </div>
+    </div>
+
+    <h3>And it draws the same watts for a quarter of the time</h3>
+    <p>
+      A GPU does not get cheaper by being clever — it gets cheaper by <em>finishing sooner</em>.
+      The card is pegged at full load for the whole render either way, so wall-clock time and
+      electricity are the same quantity. Energy is power × time, and only the time changed.
+    </p>
+
+    <svg viewBox="0 0 720 216" width="100%" role="img" aria-label="Energy per image: same power, much shorter time">
+      <defs>
+        <pattern id="saved" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#0b0f14"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#fbbf24" stroke-width="2"/>
+        </pattern>
+      </defs>
+
+      <text x="96" y="26" fill="#93a4b8" font-size="12">watts held constant ≈ 300 W · width = seconds · area = watt-hours</text>
+
+      <text x="96" y="48" fill="#f87171" font-size="13">Before · 325.1 s</text>
+      <rect x="96" y="54" width="520" height="44" fill="#f87171" opacity="0.85"/>
+      <rect x="220" y="54" width="396" height="44" fill="url(#saved)"/>
+      <text x="104" y="82" fill="#1b0f10" font-size="13" font-weight="700">27.1 Wh</text>
+      <rect x="234" y="67" width="198" height="19" rx="4" fill="#0b0f14" opacity="0.88"/>
+      <text x="241" y="81" fill="#fbbf24" font-size="12">20.6 Wh you no longer pay for</text>
+
+      <text x="96" y="122" fill="#4ade80" font-size="13">After · 77.6 s</text>
+      <rect x="96" y="128" width="124" height="44" fill="#4ade80" opacity="0.85"/>
+      <text x="104" y="156" fill="#0c1a12" font-size="13" font-weight="700">6.5 Wh</text>
+      <text x="234" y="156" fill="#4ade80" font-size="12">← this picture is already finished here</text>
+
+      <line x1="220" y1="46" x2="220" y2="182" stroke="#4ade80" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="96" y1="188" x2="616" y2="188" stroke="#22303f"/>
+      <g fill="#93a4b8" font-size="11.5" text-anchor="middle">
+        <text x="96"  y="204">0 s</text>
+        <text x="256" y="204">100</text>
+        <text x="416" y="204">200</text>
+        <text x="576" y="204">300 s</text>
+      </g>
+    </svg>
+
+    <div class="callout">
+      <p><strong>The assumption, stated rather than hidden.</strong> Power was not logged during
+      the slow build. The figures below use the load draw already measured by the Nim Power Meter
+      on this machine — about 11 W idle, 318 W at full load — and hold it constant. If the slower
+      build drew <em>less</em> (poor occupancy can leave a GPU under-fed), the saving shrinks.
+      The table shows how much:</p>
+      <table>
+        <tr><th>If the slow build drew</th><th class="num">Wh per image, before</th><th class="num">Wh saved per image</th><th class="num">Energy ratio</th></tr>
+        <tr><td>200 W</td><td class="num">18.1</td><td class="num">11.6</td><td class="num">2.8×</td></tr>
+        <tr><td>250 W</td><td class="num">22.6</td><td class="num">16.1</td><td class="num">3.5×</td></tr>
+        <tr><td>300 W (headline)</td><td class="num">27.1</td><td class="num">20.6</td><td class="num">4.2×</td></tr>
+      </table>
+      <p>Even the least flattering row is a 2.8× cut in electricity per picture. The time ratio
+      (4.19×) is exact; only the power ratio is assumed.</p>
+    </div>
+
+    <p>
+      Put in units you can act on: a hundred 512×512 renders went from <strong>2.7 kWh</strong>
+      to <strong>0.65 kWh</strong> — about the difference between running a space heater for two
+      hours and running it for half an hour, for identical output.
+    </p>
+
+
+    <h3>It did not just get faster — it started working</h3>
+    <p>
+      For a while every picture came out as a perfectly flat white rectangle. Not a bad picture.
+      A <em>blank</em> one: one single colour, 8,746 bytes of file. That is the fingerprint of a
+      number that has gone to infinity and been clipped on the way out.
+    </p>
+
+    <div class="gallery">
+      <figure class="broken">
+        <img src="assets/01-broken-white.webp" alt="A pure white image produced by the broken build" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption><strong>Before.</strong> Every prompt, every seed. std 0.00, one value.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/02-fixed-cat.webp" alt="A photo of a cat rendered by Stable Diffusion 2.1" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption><strong>After.</strong> "a photo of a cat" — and byte-identical to the picture from before the regression.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/03-sphere.webp" alt="A chrome sphere on black velvet" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption>"a chrome sphere on black velvet" — real highlights, real reflection.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/04-orchid.webp" alt="A white orchid against a black background" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption>"a white orchid against a black background" — 0 to 255, no clipping.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/05-car.webp" alt="A red sports car on a coastal road at golden hour" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption>"a red sports car on a coastal road, golden hour"</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/06-cyber.webp" alt="A cyberpunk cityscape at night with neon lights" width="512" height="512" loading="lazy" decoding="async">
+        <figcaption>"a cyberpunk cityscape at night with neon lights"</figcaption>
+      </figure>
+    </div>
+
+    <div class="callout good">
+      <p><strong>The strongest proof we have:</strong> the cat picture after the fix is
+      <em>byte-for-byte identical</em> to the picture produced before things broke
+      (<span class="mono">md5 1588f0f1…</span>). Not "looks similar" — identical. A faster
+      renderer that quietly changes the output is a bug; this one does not.</p>
+    </div>
+
+    <p class="dim small">
+      Every number in this report comes from <span class="mono">sd-rx580/evidence/bench.csv</span>
+      and is reproducible with <span class="mono">sd-rx580/tools/bench.sh</span>. Nothing here is
+      estimated.
+    </p>
+  </div>
+</section>
+
+<!-- ================= PART 2 ================= -->
+<section id="part2">
+  <div class="wrap">
+    <div class="tag">Part 2 · The problem</div>
+    <h2>Why a graphics card is a rowing boat</h2>
+
+    <p>
+      A GPU does not run one instruction at a time. It runs them in fixed-size squads, and every
+      member of the squad must move together — like a rowing crew in one boat. When the squad is
+      told "everyone grab the fourth item", all 32 or all 64 rowers do it at once.
+    </p>
+    <p>
+      The catch: <strong>how many rowers are in the boat is a property of the hardware</strong>.
+      Apple's own chips put 32 in a boat. This AMD RX&nbsp;580 puts <strong>64</strong> in the boat.
+      Software written by counting on 32 gets two possible endings:
+    </p>
+    <ul>
+      <li><strong>The wasteful one.</strong> It only ever calls 32 rowers. Half the boat sits
+      idle, doing nothing, for the entire race.</li>
+      <li><strong>The dangerous one.</strong> It does the arithmetic for seat <em>n</em> assuming
+      seats stop at 31. At seat 48 it asks for something that does not exist, and reads whatever
+      happens to be next in memory.</li>
+    </ul>
+
+    <svg viewBox="0 0 720 214" width="100%" role="img" aria-label="Diagram of 32 lanes used versus 64 lanes used">
+      <text x="24" y="20" fill="#93a4b8" font-size="13">Rows = the 64 lanes of one wave on this card</text>
+
+      <text x="24" y="52" fill="#e6edf5" font-size="14">Before: software assumed 32</text>
+      <!-- 32 lit -->
+      <g>
+        <rect x="24"   y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="34.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="45.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="55.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="66.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="77"   y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="87.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="98.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="108.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="119.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="130" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="140.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="151.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="161.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="172.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="183" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="193.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="204.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="214.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="225.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="236" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="246.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="257.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="267.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="278.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="289" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="299.6" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="310.2" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="320.8" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="331.4" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="342" y="60" width="9" height="18" fill="#4ade80"/>
+        <rect x="352.6" y="60" width="9" height="18" fill="#4ade80"/>
+      </g>
+      <rect x="363" y="60" width="329" height="18" fill="#1b2634" stroke="#2b3b4d" stroke-dasharray="3 3"/>
+      <text x="368" y="74" fill="#6b7c92" font-size="12">32 lanes idle — nothing to do, all race long</text>
+
+      <text x="24" y="118" fill="#e6edf5" font-size="14">After: all 64 lanes carry work</text>
+      <defs>
+        <pattern id="cells" width="10.6" height="18" patternUnits="userSpaceOnUse">
+          <rect width="9" height="18" fill="#4ade80"/>
+        </pattern>
+      </defs>
+      <rect x="24" y="126" width="678" height="18" fill="url(#cells)"/>
+
+      <text x="24" y="176" fill="#93a4b8" font-size="12.5">Same silicon. Same clock. The difference is whether the software knows how many seats the boat has.</text>
+      <text x="24" y="196" fill="#93a4b8" font-size="12.5">This is not a tuning detail — it decides whether the answers are right at all.</text>
+    </svg>
+
+    <h3>Where the bug actually came from</h3>
+    <p>
+      The port had been told, in so many words, "pretend the boat has 32 seats". That works — the
+      crew rows in half the boat and the numbers come out right. Unfortunately the other half of
+      the code still believed it had 64 seats, and the two disagreed. The disagreement produced
+      infinities, and infinity clipped to white.
+    </p>
+    <p>
+      So the first fix was not an optimisation. It was removing a lie: <strong>tell the software
+      how many seats the boat really has.</strong> The white pictures disappeared, and the cat came
+      back byte-identical to the older working build.
+    </p>
+
+    <div class="callout">
+      <p><strong>And that is not the whole story either.</strong> Fixing the seat count restored
+      <em>correctness</em>. It barely touched <em>speed</em> — 20.8 to 19.7 seconds per step. The
+      speed came from somewhere else entirely, and Part 3 shows how we found it.</p>
+    </div>
+
+    <h3>Does this matter beyond one old card?</h3>
+    <p>
+      Yes, and this is the part worth sending to anyone who thinks 64-lane hardware is ancient
+      history.
+    </p>
+    <div class="two">
+      <div class="card">
+        <h3>64-lane hardware is the current frontier</h3>
+        <p class="small">
+          AMD's data-centre line — MI100, MI200, and <strong>MI300</strong> — runs
+          <strong>64-wide waves</strong> as its native mode. The same is true across the CDNA
+          family. A habit of "assume 32" is not a legacy problem; it is a problem that lands on
+          the most expensive accelerators you can buy.
+        </p>
+        <p class="small dim">Consumer RDNA (RX 5000 and later) prefers 32 but still supports 64.</p>
+      </div>
+      <div class="card">
+        <h3>And it is already shipping to real users</h3>
+        <p class="small">
+          Every Intel-era Mac with a <em>GCN</em> AMD GPU — Polaris, like this RX 580, and Vega —
+          reports a 64-wide wave through Metal. Anyone running local AI on one of those machines
+          is on this path today, with no alternative graphics API. RDNA Macs report a different
+          width and we did not verify them: the 2026 reports show they fail in their own way, not
+          that they are immune.
+        </p>
+        <p class="small dim">That is a large, quiet population, not a laboratory curiosity.</p>
+      </div>
+    </div>
+
+    <div class="callout bad">
+      <p><strong>Our honest limitation.</strong> There was exactly one GPU available to test on:
+      an RX 580 (Polaris, gfx803). We could not validate on MI300, on RDNA, or on a second AMD
+      Metal device. What we can say is that the <em>pattern</em> — derive the lane maths from the
+      hardware, never write 32 — is what makes a kernel survive on any of them. Part 4 turns that
+      into a concrete patch for llama.cpp.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PART 3 ================= -->
+<section id="part3">
+  <div class="wrap">
+    <div class="tag">Part 3 · How it happened in sd-rx580</div>
+    <h2>Four bugs, in the order they were found</h2>
+    <p>
+      Each one was found by measurement, not by reading code and guessing. The order matters,
+      because three of the four were invisible until the previous one was gone.
+    </p>
+
+    <h3>Bug 1 — the lie about the boat size</h3>
+    <p>
+      A width-32 clamp, added in two places. Symptom: pure white images, std exactly 0.00.
+      The proof was a clean A/B — an older binary in the tree reported
+      <span class="mono">simdgroup width = 64</span> and rendered correctly; the newer one
+      reported <span class="mono">32</span> and did not.
+    </p>
+    <p class="dim small">
+      How we proved it was not the kernels: pointing the backend at the older kernel snapshot
+      changed nothing; running the text encoder on CPU changed nothing; running the VAE decoder on
+      CPU changed nothing. All three produced byte-identical white pixels, so the output was
+      constant and the fault had to be in the C++.
+    </p>
+
+    <h3>Bug 2 — a number doing two jobs</h3>
+    <p>
+      Once images were correct, the conformance matrix showed the compressed weight formats — the
+      ones squeezed into fewer bits to save memory — were badly wrong: 36 pass / 39 fail for q8_0,
+      37 / 43 for q4_0. The cause was one constant, <span class="mono">NQ</span>, being used for two
+      unrelated things: how many weights one lane handles, <em>and</em> how many blocks the squad
+      advances per round. At 32 seats those two numbers happen to be the same. At 64 they are not,
+      and half the lanes read past the end of their block.
+    </p>
+    <p>
+      Splitting it into "lanes per block" and "blocks per round" fixed all four formats at once.
+    </p>
+
+    <h3>Bug 3 — the optimiser that never ran</h3>
+    <p>
+      This is the one that mattered most, and it hid for two hours.
+    </p>
+    <p>
+      We had written a tiled matrix multiplier — the thing that makes GPUs fast — and measured a
+      solid 2× improvement. Then three more improvements each returned about 1%, which looked like
+      a hardware ceiling. It was not. It was a ceiling on <em>30% of the work</em>.
+    </p>
+    <p>
+      The fix to the measurement tool was trivial and embarrassing: a timing print that fired only
+      on every 32nd event, when a single image produces far fewer than 32 events. Once it printed
+      every time, the answer took ten seconds to read:
+    </p>
+    <table>
+      <tr><th>Part of one image</th><th class="num">Time on GPU</th><th>Verdict</th></tr>
+      <tr><td>Text encoder (CLIP)</td><td class="num">0.06 s</td><td>irrelevant</td></tr>
+      <tr><td>Image generator (UNet), per step</td><td class="num">6.05 s</td><td>80% of the run</td></tr>
+      <tr><td>Image decoder (VAE), one graph</td><td class="num"><strong>24.6 s</strong></td><td>16% — in one place!</td></tr>
+    </table>
+    <p>
+      And the tiled multiplier had a guard: <em>only for 32-bit float data</em>. The convolutions —
+      the entire decoder, and every convolution inside the generator — run in <strong>16-bit</strong>
+      data. They never used it. We had been optimising the part that was already fast.
+    </p>
+    <div class="callout good">
+      <p>Teaching the tiled kernel about 16-bit data halved the generator (6.05 → 3.26 s per
+      step) and cut the decoder from 24.6 s to 16.1 s. That single change was worth more than
+      everything before it.</p>
+    </div>
+
+    <svg viewBox="0 0 720 232" width="100%" role="img" aria-label="One threadgroup per column versus one tile producing many columns">
+      <text x="20" y="18" fill="#93a4b8" font-size="13">How a matrix multiply was being run — and how it is run now</text>
+
+      <text x="20" y="46" fill="#f87171" font-size="14">Before: one pass per output column</text>
+      <rect x="24" y="58" width="78" height="120" rx="6" fill="#1b2634" stroke="#33506e"/>
+      <text x="63" y="122" fill="#93a4b8" font-size="11" text-anchor="middle">weights</text>
+      <g stroke="#f87171" stroke-width="1.4">
+        <line x1="106" y1="70"  x2="150" y2="70"/><line x1="106" y1="90"  x2="150" y2="90"/>
+        <line x1="106" y1="110" x2="150" y2="110"/><line x1="106" y1="130" x2="150" y2="130"/>
+        <line x1="106" y1="150" x2="150" y2="150"/><line x1="106" y1="166" x2="150" y2="166"/>
+      </g>
+      <g fill="#243447" stroke="#33506e">
+        <rect x="152" y="63" width="26" height="14" rx="3"/><rect x="152" y="83" width="26" height="14" rx="3"/>
+        <rect x="152" y="103" width="26" height="14" rx="3"/><rect x="152" y="123" width="26" height="14" rx="3"/>
+        <rect x="152" y="143" width="26" height="14" rx="3"/><rect x="152" y="159" width="26" height="14" rx="3"/>
+      </g>
+      <text x="190" y="112" fill="#f87171" font-size="12">…N times</text>
+      <text x="190" y="132" fill="#93a4b8" font-size="11.5">the weights are streamed</text>
+      <text x="190" y="148" fill="#93a4b8" font-size="11.5">from memory once per column</text>
+
+      <line x1="352" y1="40" x2="352" y2="200" stroke="#22303f"/>
+      <text x="380" y="46" fill="#4ade80" font-size="14">After: one pass per 32-column tile</text>
+      <rect x="384" y="58" width="78" height="120" rx="6" fill="#1b2634" stroke="#33506e"/>
+      <rect x="384" y="58" width="78" height="40" fill="#1d3a2a" stroke="#4ade80"/>
+      <text x="423" y="82" fill="#4ade80" font-size="11" text-anchor="middle">one tile</text>
+      <line x1="466" y1="78" x2="536" y2="78" stroke="#4ade80" stroke-width="1.6"/>
+      <rect x="538" y="58" width="120" height="40" rx="6" fill="#1d3a2a" stroke="#4ade80"/>
+      <text x="598" y="82" fill="#4ade80" font-size="11" text-anchor="middle">32 columns at once</text>
+      <text x="490" y="140" fill="#93a4b8" font-size="11.5">each weight tile is read once</text>
+      <text x="490" y="156" fill="#93a4b8" font-size="11.5">and reused 32 times</text>
+      <text x="490" y="180" fill="#4ade80" font-size="11.5">→ 32× less memory traffic</text>
+    </svg>
+
+    <h3>Bug 4 — the obvious answer that lost</h3>
+    <p>
+      With a working tiled kernel, the obvious next step was a bigger tile: 32×32 instead of 16×16.
+      It <em>should</em> have won, because a bigger tile reads the weights fewer times. It lost by
+      18%.
+    </p>
+    <p>
+      The reason is the same rowing boat. A 32×32 tile at one output per thread needs a crew of
+      1024. On this card that leaves room for barely two crews per engine, so there is almost
+      nothing in flight to hide the memory delays. The fix was not a bigger crew — it was the same
+      32×32 tile held in <strong>registers</strong>, on a crew of 256. Same reuse, four times the
+      concurrency. That is the last 13%.
+    </p>
+
+    <h3>The instrument that made this possible</h3>
+    <p>
+      None of the above was found by staring at code. It was found by a small test bench that runs
+      the vendor's own conformance suite once per data format and prints a pass/fail matrix:
+    </p>
+    <table>
+      <tr><th>Weight format</th><th class="num">Failures before</th><th class="num">Failures after</th><th>Used by SD 2.1?</th></tr>
+      <tr><td>f32</td><td class="num bad">150 †</td><td class="num ok">0</td><td>yes — most of it</td></tr>
+      <tr><td>f16</td><td class="num bad">186 †</td><td class="num ok">0</td><td>yes — convolutions</td></tr>
+      <tr><td>q8_0</td><td class="num bad">39</td><td class="num ok">0</td><td>optional</td></tr>
+      <tr><td>q4_0</td><td class="num bad">43</td><td class="num ok">0</td><td>optional</td></tr>
+      <tr><td>q4_1 · q5_0 · q5_1</td><td class="num bad">not measured</td><td class="num ok">0</td><td>optional</td></tr>
+      <tr><td>q5_K · q6_K</td><td class="num bad">not measured</td><td class="num ok">0</td><td>optional</td></tr>
+      <tr><td>q2_K · q3_K · q4_K · mxfp4</td><td class="num bad">not measured</td><td class="num bad">9 · 41 · 17 · 17</td><td>no</td></tr>
+    </table>
+    <p class="dim small">
+      † Those two "before" figures come from the wider unfiltered run taken before the fixes — the
+      plain-path filter used for every other number here did not exist yet, so they are indicative,
+      not like-for-like. <strong>q4_0 and q8_0 are exact before/after on identical filters.</strong>
+    </p>
+    <p class="dim small">
+      The bottom row is the honest part: four exotic formats are still wrong. They are listed, not
+      hidden, and they do not affect Stable Diffusion because it never uses them.
+      <a href="#appendix">Every known failure is consolidated at the back →</a>
+    </p>
+
+    <div class="callout">
+      <p><strong>A measurement lesson worth more than the speedup.</strong> We re-ran the identical
+      kernel, producing byte-identical images, three times: 89.1 s, 89.6 s, 92.7 s. That is
+      <strong>4% run-to-run noise</strong>. Every "1% improvement" before we knew that was noise
+      being mistaken for progress. The real wins were 13%, 43% and 110% — comfortably outside it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PART 4 ================= -->
+<section id="part4">
+  <div class="wrap">
+    <div class="tag">Part 4 · Chapter 2, in progress</div>
+    <h2>We kept hitting the same bug in llama.cpp — so this is where we finally corner it</h2>
+
+    <p>
+      Everything above lives in a fork of <span class="mono">stable-diffusion.cpp</span>, which
+      shares its compute layer with <span class="mono">llama.cpp</span>. That is not a coincidence
+      we noticed afterwards. Running llama.cpp on this card kept producing the same wrong
+      answers, across several attempts, and nothing we tried cleared it.
+    </p>
+    <p>
+      A diffusion pipeline was simply the easier place to catch the culprit: when the maths goes
+      wrong there you get a visibly wrong picture, not a plausible-looking sentence. Chapter 1 is
+      that capture. This chapter takes the same defect back to where it lives.
+    </p>
+
+    <div class="card">
+      <h3>The series</h3>
+      <p class="small">
+        <strong>Chapter 1 — this page.</strong> Stable Diffusion 2.1 on an RX 580: the white
+        images, the four bugs, 4.19× faster. Finished, measured, reproducible.<br>
+        <strong>Chapter 2 — next.</strong> llama.cpp on 64-lane hardware: reproduce the failure on
+        a stock build, apply the patch below, carry it upstream. The patch already exists; what
+        remains is switching those four jobs back on and running them this page does not claim.
+      </p>
+    </div>
+
+<pre><code>kernels/common.h:24
+  #define N_SIMDWIDTH 32   // default; ggml_metal_device overrides it with the real width
+
+ggml-metal-device.m:470
+  if (simd_width &gt; 0 &amp;&amp; simd_width != 32) {
+      [prep setObject:... forKey:@"N_SIMDWIDTH"];   // adopts the real width
+  }
+
+kernels/mul_mv.metal:259
+  const short ix = (tiisg/(NW/NQ));
+  const short il = (tiisg%(NW/NQ))*8;              // NW = N_SIMDWIDTH
+</code></pre>
+
+    <p>
+      Read those three lines together in plain terms. The card tells the software how many rowers
+      are in the boat, and the software listens — good. But then it decides <em>which part of a box
+      to fetch</em> by dividing the seat number, and with 64 seats that division hands out
+      positions the box does not contain.
+    </p>
+    <p>
+      Weights live in small boxes of 32 numbers. Two rowers finish a box: sixteen numbers each.
+      The code assumed four rowers would share it — which is only true when the boat has 32 seats.
+      With 64 seats, two of every four rowers reach past the end of their box and pick up whatever
+      is lying next to it in memory. Nothing crashes. The arithmetic still runs. The answer is just
+      quietly wrong.
+    </p>
+
+    <div class="callout">
+      <p><strong>And the llama.cpp project already knows.</strong> This is where I was wrong the
+      first time. I expected to find something nobody had noticed. What is actually there is a
+      list — a list of jobs the card is allowed to do — with a note written beside it:</p>
+      <pre><code>static bool ggml_metal_supports_mul_mat_wide(...) {
+    // q4_0/q4_1/q5_0/q5_1 still route through mul_mv_ext, which is not yet correct at 64
+    // lanes (0/121, 0/99, 0/63, 0/56 on MUL_MAT) even with nypsg and the dispatch width
+    // fixed - keep them on the CPU path until that is resolved.
+    case GGML_TYPE_Q4_K: ...</code></pre>
+      <p>
+        Read that note as a sentence, because that is what it is: <em>these four are not right on
+        64-seat cards yet, so we keep them off the card until someone fixes it.</em> Somebody found
+        the same thing, measured it, wrote the numbers down, and switched the job off. With the job
+        switched off, the slow brain does the work instead — which is why this shows up as slowness
+        rather than as wrong answers.
+      </p>
+      <p>
+        I checked that on this machine with the project's own test program: every one of those
+        cases comes back "not supported", and nothing runs. Not broken — <em>declined</em>.
+      </p>
+      <p>
+        Which makes the contribution smaller and more useful than "I found a bug". The note ends
+        with <em>until that is resolved</em>. This is the resolve.
+      </p>
+    </div>
+
+    <h3>How long has this been open?</h3>
+    <p>
+      Longer than a bug this simple should survive — and mostly because each report landed as an
+      isolated mystery instead of one named defect.
+    </p>
+    <table>
+      <tr><th>When</th><th>What happened</th></tr>
+      <tr><td>Sep 2023</td><td><a href="https://github.com/ggml-org/llama.cpp/issues/3000">llama.cpp #3000</a> — "[macos] AMD GPU using mul_mm in metal". The first report we can find. Closed automatically as stale after 14 days of inactivity.</td></tr>
+      <tr><td>Jun 2024</td><td><a href="https://github.com/ollama/ollama/issues/5071">ollama #5071</a> — "not utilizing AMD GPU through METAL". The same fault, reported from the application layer instead of the backend.</td></tr>
+      <tr><td>Feb 2026</td><td><a href="https://github.com/ggml-org/llama.cpp/issues/19563">#19563</a> — "Metal backend produces garbage output on AMD discrete GPUs". The blank-image class of failure, reported plainly.</td></tr>
+      <tr><td>Feb 2026</td><td><a href="https://github.com/ggml-org/llama.cpp/issues/19601">#19601</a> — two distinct bugs named: concurrent dispatch broken on non-UMA, and <span class="mono">simd_max(half)</span> wrong with −INF on RDNA. Both fixed on the reporter's branch.</td></tr>
+      <tr><td>Jun 2026</td><td><a href="https://github.com/KhronosGroup/MoltenVK/issues/2756">MoltenVK #2756</a> — the same 64-wide subgroup assumption breaks Vulkan-on-Metal shuffle ops on RDNA. A different project, the same root cause.</td></tr>
+    </table>
+    <p>
+      So: <strong>reported in 2023, closed as stale, rediscovered in 2026.</strong> Three years is
+      not because the fix is hard — it is three small edits — but because nobody owned the problem long
+      enough to reproduce it twice.
+    </p>
+    <p>
+      Credit where it is due: <strong>our fork already carries the first two fixes</strong> from
+      #19601 — concurrency disabled when the GPU has no unified memory, and the
+      <span class="mono">simd_max</span> half→float cast. That work is why this card renders at
+      all. The third item is different in kind: q4_0/q4_1/q5_0/q5_1 are not broken by accident.
+      They are <em>excluded on purpose</em>, in a comment that asks for exactly this fix.
+    </p>
+
+    <div class="callout bad">
+      <p><strong>What is proven, and what is still owed.</strong> Proven here: the mistake is real
+      and measured — 43 of those cases failed on this card before the fix, none after. Proven about
+      the project: with their list unchanged, those four jobs never reach the card at all. Still
+      owed: cross the four lines off that list, apply the patch, and run it. Their own note says
+      the count is zero out of 121 today. The patch should make it 121 out of 121. Until somebody
+      runs it, that is an expectation, not a result.</p>
+    </div>
+
+    <h3>The patch, in three ideas</h3>
+    <pre><code>// 1. Derive "lanes per block" from the block, never from the wave width.
+constexpr short NLB = QK4_0/NQ;   // 32 quants / 16 per lane = 2 lanes per block
+constexpr short NBL = NW/NLB;     // blocks advanced per round: 16 at 32 lanes, 32 at 64
+const short ix = tiisg/NLB;
+const short il = (tiisg%NLB)*8;
+
+// 2. Advance by the number of blocks actually covered per round.
+for (int ib = ib0; ib &lt; nb; ib += NBL) { ... yb += QK4_0*NBL; }
+
+// 3. Same treatment for q8_0, which has the identical "NQ does two jobs" defect.
+</code></pre>
+    <p>
+      At 32 lanes these reduce to exactly the current expressions, so <strong>Apple Silicon cannot
+      regress</strong> — that is the property that makes the patch reviewable.
+    </p>
+
+    <h3>The performance half</h3>
+    <p>
+      The same card was also slow, for an unrelated reason. When the graphics chip has no built-in
+      shortcut for multiplying tables of numbers — and this one does not — the software falls back
+      to a method that re-reads the entire weight table once for <em>every single output column</em>.
+      That is like re-reading the whole recipe before cutting each individual slice of cake.
+    </p>
+    <p>
+      The fix is the obvious one in kitchen terms: read the recipe once, then cut a whole tray of
+      slices from that one reading. In this card's case that alone was worth more than doubling the
+      speed. The engineering detail is in <span class="mono">llama-cpp/ALGORITHM.md</span> for
+      anyone who wants it.
+    </p>
+
+    <h3>How to check it yourself</h3>
+<pre><code># On any device where threadExecutionWidth != 32:
+./build/bin/test-backend-ops -b MTL0 -o MUL_MAT -p type_a=q4_0
+./build/bin/test-backend-ops -b MTL0 -o MUL_MAT -p type_a=q8_0
+
+# Note: -p splits on commas into key=value pairs, so shape filters such as
+# bs=[1,1] cannot be expressed there - filter the printed case strings instead.
+# Export GGML_METAL_PATH_RESOURCES to the source tree, or the backend compiles a
+# stale copy of the kernels from build/bin/kernels and your edit does nothing.
+</code></pre>
+
+    <p class="small dim">
+      Patch, facts and adoption notes: <span class="mono">wave64-report/llama-cpp/</span>.
+      Deliberately no PR draft — llama.cpp prohibits AI-written PR descriptions, so the
+      submission has to be written by the person who did the work.
+    </p>
+  </div>
+</section>
+
+<!-- ================= APPENDIX ================= -->
+<section id="appendix">
+  <div class="wrap">
+    <div class="tag">Appendix · For engineers</div>
+    <h2>The details, without the kitchen words</h2>
+
+    <h3>Where the code lives</h3>
+    <table>
+      <tr><th>Thing</th><th>Path</th></tr>
+      <tr><td>The port</td><td class="mono">sd-rx580/Vendor/stable-diffusion.cpp/ggml/src/ggml-metal/</td></tr>
+      <tr><td>Tiled GEMM</td><td class="mono">kernels/mul_mv.metal — kernel_mul_mm_simt_{f32,f16,f16_f16,f32_f16}</td></tr>
+      <tr><td>Dispatch</td><td class="mono">ggml-metal-ops.cpp — branch before ggml_metal_op_mul_mat_mv</td></tr>
+      <tr><td>Conformance matrix</td><td class="mono">sd-rx580/tools/matrix.py</td></tr>
+      <tr><td>Benchmark</td><td class="mono">sd-rx580/tools/bench.sh → evidence/bench.csv</td></tr>
+      <tr><td>Hardware probe</td><td class="mono">sd-rx580/tools/wave_probe.mm</td></tr>
+      <tr><td>The board</td><td class="mono">sd-rx580/docs/wave64-board.md</td></tr>
+    </table>
+
+    <h3>Reproduce it</h3>
+<pre><code>cd sd-rx580/Vendor/stable-diffusion.cpp
+cmake --build build --target sd-cli test-backend-ops -j8   # skip the .air targets:
+                                                          # xcrun metal is not installed
+
+cd ../../tools
+./wave_probe                       # dispatch-width semantics on this GPU
+./matrix.py --plain f32 f16        # the gate: expect 0 fail
+PROMPT="a photo of a cat" STEPS=20 SEED=42 ./bench.sh mytest   # s/it + image stats</code></pre>
+
+    <h3>Numbers as measured</h3>
+    <table>
+      <tr><th>Config</th><th class="num">20-step total</th><th class="num">s/it</th></tr>
+      <tr><td>matvec fallback</td><td class="num">325.1 s</td><td class="num">16.26</td></tr>
+      <tr><td>tiled GEMM, f32 src1</td><td class="num">155.6 s</td><td class="num">7.78</td></tr>
+      <tr><td>tiled GEMM, all src1</td><td class="num">89.1 s</td><td class="num">4.45</td></tr>
+      <tr><td>32×32 / 1024 threads</td><td class="num">107.3 s</td><td class="num">5.37</td></tr>
+      <tr><td>16×32 / 512 threads</td><td class="num">95.7 s</td><td class="num">4.78</td></tr>
+      <tr><td><strong>32×32 register-blocked / 256</strong></td><td class="num"><strong>77.6 s</strong></td><td class="num"><strong>3.88</strong></td></tr>
+    </table>
+
+    <h3>Things that will waste your afternoon</h3>
+    <ul>
+      <li><strong>The kernel copy.</strong> Without <span class="mono">GGML_METAL_PATH_RESOURCES</span>,
+        the backend compiles <span class="mono">build/bin/kernels/*.metal</span> — a build-time
+        snapshot. Edits under <span class="mono">ggml/src/</span> silently never reach the GPU.</li>
+      <li><strong><span class="mono">-p</span> is not a regex.</strong> It splits on commas into
+        <span class="mono">key=value</span> constraints, so <span class="mono">bs=[1,1]</span>
+        becomes two broken tokens. Filter in Python instead.</li>
+      <li><strong>Shader compilation is not free.</strong> ~50–80 s per changed kernel source, per
+        process. Batch your kernel edits.</li>
+      <li><strong><span class="mono">xcrun metal</span> is missing</strong> without full Xcode, so the
+        metallib targets fail. Build the binaries only.</li>
+      <li><strong>A gate that can never pass is not a gate.</strong> An unfiltered matrix is
+        dominated by broadcast/permute shapes no diffusion model emits.</li>
+    </ul>
+
+    <h3>Known failures — kept deliberately</h3>
+    <p>
+      Everything below is still broken, still unmeasured, or still an assumption. It is gathered
+      in one place, at the back, so it cannot be missed and no reader has to discover it alone.
+    </p>
+    <table>
+      <tr><th>Item</th><th>State</th><th>Does it matter for SD 2.1?</th></tr>
+      <tr><td>q3_K quantised matvec</td><td class="bad">41 of 41 fail</td><td>no — format unused</td></tr>
+      <tr><td>q4_K quantised matvec</td><td class="bad">17 fail</td><td>no — format unused</td></tr>
+      <tr><td>q2_K quantised matvec</td><td class="bad">9 fail</td><td>no — format unused</td></tr>
+      <tr><td>mxfp4 quantised matvec</td><td class="bad">17 fail</td><td>no — format unused</td></tr>
+      <tr><td><strong>Flash attention at width 64</strong></td><td class="bad">does not exist</td><td><strong>yes — costs speed</strong></td></tr>
+      <tr><td>Small-N matmuls (<span class="mono">ne11 &lt; 16</span>)</td><td class="bad">still on the slow matvec path</td><td>yes — some</td></tr>
+      <tr><td>f32 / f16 "before" matrix figures</td><td class="bad">not like-for-like (†)</td><td>caveat only</td></tr>
+      <tr><td>q4_1 / q5_0 / q5_1 / q5_K / q6_K "before"</td><td class="bad">never measured</td><td>no</td></tr>
+      <tr><td>Electricity per image</td><td class="bad">derived from 300 W, not measured</td><td>caveat only</td></tr>
+      <tr><td>RDNA simdgroup width</td><td class="bad">unverified</td><td>no — this card is GCN</td></tr>
+      <tr><td>Upstream llama.cpp reproduction</td><td class="bad">outstanding</td><td>Chapter 2</td></tr>
+    </table>
+    <p>
+      Two of these deserve a sentence rather than a table cell.
+    </p>
+    <p>
+      <strong>Flash attention is the failure that costs you something.</strong> The port wraps every
+      <span class="mono">fa_vec_*</span> instantiation in <span class="mono">#if N_SIMDWIDTH == 32</span>,
+      so at width 64 the entire vector flash-attention family compiles out and the UNet falls back
+      to explicit softmax. Porting those kernels is a prerequisite for flash attention to exist here
+      at all — not a tuning knob to turn later.
+    </p>
+    <p>
+      <strong>The quantised formats nobody uses are still wrong.</strong> It would have been easy to
+      delete four rows from a table and ship a report that looks complete. They stay because a matrix
+      with holes in it, honestly labelled, is worth more than a green one that quietly omits its
+      failures.
+    </p>
+    <p class="dim small">
+      If something in this report is wrong, the most likely place is one of the eleven rows above.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Built on an AMD RX 580 (Polaris, gfx803) via Metal, on macOS, with a patched
+      <span class="mono">ggml</span> backend. Model: Stable Diffusion 2.1, 512×512, 20 steps,
+      euler-a, cfg 7.0.
+    </p>
+    <p class="small">
+      <strong>Scope.</strong> One person, one card, one machine, a handful of days. Nobody has
+      independently reproduced these numbers, and this page does not pretend otherwise — it is a
+      first-hand report, not a peer-reviewed result. What it offers instead is everything needed
+      to check it cheaply: each figure traces to a file in
+      <span class="mono">sd-rx580/evidence/</span>, the benchmark is one shell script, and the
+      central claim — byte-identical output — is verifiable with <span class="mono">md5</span> in
+      about a second.
+    </p>
+    <p class="small mono" style="color:var(--dim);border-top:1px solid var(--line);padding-top:14px;margin-top:22px">
+      wave64-report v1.1 · Chapter 1 · frozen 2026-11-04
+    </p>
+    <p class="small">
+      Every figure is reproducible from <span class="mono">sd-rx580/evidence/</span>. The failures
+      are included on purpose — four data formats are still wrong, and the report says so.
+    </p>
+    <p class="small">
+      <strong>Chapter 1 of a series.</strong> Chapter 2 picks up the same defect in llama.cpp,
+      where it has been breaking our own runs; the patch is written and the upstream reproduction
+      is next.
+    </p>
+  </div>
+</footer>
+
+<script>
+  // ---- support: Ko-fi widgets only, no local config needed ----
+</script>
+
+<!-- Ko-fi floating widget (bottom-right). Loads from ko-fi.com; harmless offline. -->
+<script src='https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'></script>
+<script>
+  kofiWidgetOverlay.draw('thiensubs', {
+    'type': 'floating-chat',
+    'floating-chat.donateButton.text': 'Support me',
+    'floating-chat.donateButton.background-color': '#f45d22',
+    'floating-chat.donateButton.text-color': '#fff'
+  });
+</script>
+</body>
+</html>
