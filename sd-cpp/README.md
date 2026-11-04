@@ -78,3 +78,6 @@ makes the patch reviewable on Apple Silicon.
 
 Uncommitted work in the author's fork; the numbers in the report were measured
 with it. No benchmark claim is made in this file.
+
+Upstream thread: <https://github.com/leejet/stable-diffusion.cpp/issues/2271> —
+asking whether the port is in scope and how to split the PR.
