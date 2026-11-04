@@ -1,7 +1,10 @@
 # The RX 580 Metal port — patches for stable-diffusion.cpp
 
-The code behind the report *Stable Diffusion on an RX 580: 4.19× faster, no blank
-images*. Two patches, applied on top of a clean upstream checkout.
+**Report:** <https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/> — the
+measurements, the four bugs and the history behind these patches.
+
+The code behind that report. Two patches, applied on top of a clean upstream
+checkout.
 
 ## Provenance
 
