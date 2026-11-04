@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The RX 580 Metal port — patches for stable-diffusion.cpp</title>
+    <meta name="description" content="Two patches that put Stable Diffusion 2.1 on an AMD RX 580: the simdgroup width fix, the group-norm aliasing fix, and the tiled SIMT GEMM.">
+    <style>
+      :root{--bg:#0b0f14;--panel:#111823;--text:#e6edf3;--muted:#8b98a8;--line:#1e2a38;--accent:#4ade80}
+      *{box-sizing:border-box}
+      body{margin:0;padding:32px 18px 64px;background:var(--bg);color:var(--text);
+           font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+      main{max-width:760px;margin:0 auto}
+      a{color:var(--accent);text-decoration:none}
+      a:hover{text-decoration:underline}
+      nav a{font-size:14px;color:var(--muted)}
+      h1{font-size:28px;line-height:1.25;margin:18px 0 6px}
+      h2{font-size:18px;margin:34px 0 10px}
+      .lede{color:var(--muted);margin:0 0 24px}
+      table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+      th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+      th{color:var(--muted);font-weight:600}
+      code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
+      pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+          overflow:auto;font-size:13px;line-height:1.55}
+      ul{padding-left:20px}
+      li{margin:6px 0}
+      .warn{border-left:3px solid var(--accent);padding:10px 14px;background:var(--panel);
+            border-radius:0 10px 10px 0;color:var(--muted);font-size:14.5px}
+      footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav><a href="../">← Back to the report</a></nav>
+
+      <h1>The RX 580 Metal port</h1>
+      <p class="lede">Two patches that put Stable Diffusion 2.1 on an AMD RX 580. Apply them on top of a clean upstream checkout.</p>
+
+      <table>
+        <tr><th>Provenance</th><th></th></tr>
+        <tr><td>upstream</td><td><code>leejet/stable-diffusion.cpp</code> @ <code>5356982584d5b46a8f5cb0842927aff6443fe174</code></td></tr>
+        <tr><td><code>ggml</code> submodule</td><td><code>d49c49e1dd361ba3c0a77c90b5b1404b83969aa8</code></td></tr>
+        <tr><td>generated</td><td>2026-11-04, from the fork's working tree — the work was uncommitted</td></tr>
+        <tr><td>apply point</td><td>both patches pass <code>git apply --check</code> at exactly those two commits (verified 2026-11-04)</td></tr>
+      </table>
+
+      <h2>Files</h2>
+      <ul>
+        <li><a href="0001-ggml-metal-rx580.patch">0001-ggml-metal-rx580.patch</a> — 24 files: Metal device, ops and impl, the width-64 kernels, the <code>fa_vec_*</code> guards, the tiled SIMT GEMM in <code>mul_mv.metal</code>, padded threadgroup memory</li>
+        <li><a href="0002-group-norm-inplace.patch">0002-group-norm-inplace.patch</a> — <code>src/core/ggml_extend.cpp</code>, one file: <code>group_norm</code> uses the out-of-place ops</li>
+        <li><a href="ALGORITHM.md">ALGORITHM.md</a> — what changes and why, in four ideas</li>
+        <li><a href="README.md">README.md</a> — the same instructions as this page, as Markdown</li>
+      </ul>
+
+      <h2>Apply</h2>
+<pre><code>git clone https://github.com/leejet/stable-diffusion.cpp
+cd stable-diffusion.cpp
+git checkout 5356982
+git submodule update --init --recursive
+
+git apply /path/to/0002-group-norm-inplace.patch
+
+cd ggml
+git apply /path/to/0001-ggml-metal-rx580.patch
+cd ..</code></pre>
+      <p><code>0001</code> applies inside <code>ggml/</code> because its paths are relative to that submodule.</p>
+
+      <h2>Build (Mac with Metal)</h2>
+<pre><code>cmake -B build -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target sd-cli test-backend-ops -j8</code></pre>
+
+      <p class="warn"><strong>Stale kernels.</strong> The build copies <code>kernels/*.metal</code> into <code>build/bin/kernels/</code>. Edit a kernel without rebuilding and you are running the old one — a silent no-op on this port.</p>
+
+      <h2>Status</h2>
+      <p>Uncommitted work in the author's fork; the numbers in the report were measured with it. No benchmark claim is made on this page.</p>
+
+      <footer>
+        <a href="../">the report</a> · <a href="/">all reports</a>
+      </footer>
+    </main>
+  </body>
+</html>

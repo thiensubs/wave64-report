@@ -1,0 +1,15 @@
+diff --git a/src/core/ggml_extend.cpp b/src/core/ggml_extend.cpp
+index 6d72cae..2038924 100644
+--- a/src/core/ggml_extend.cpp
++++ b/src/core/ggml_extend.cpp
+@@ -842,8 +842,8 @@ ggml_tensor* ggml_ext_group_norm(ggml_context* ctx,
+ 
+     x = ggml_group_norm(ctx, x, num_groups, eps);
+     if (w != nullptr && b != nullptr) {
+-        x = ggml_mul_inplace(ctx, x, w);
+-        x = ggml_add_inplace(ctx, x, b);
++        x = ggml_mul(ctx, x, w);
++        x = ggml_add(ctx, x, b);
+     }
+     return x;
+ }
