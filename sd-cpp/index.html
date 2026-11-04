@@ -37,6 +37,15 @@
       <h1>The RX 580 Metal port</h1>
       <p class="lede">Two patches that put Stable Diffusion 2.1 on an AMD RX 580. Apply them on top of a clean upstream checkout.</p>
 
+      <h2>Patch it in one go</h2>
+<pre><code>git clone https://github.com/leejet/stable-diffusion.cpp
+cd stable-diffusion.cpp
+git checkout 5356982
+git submodule update --init --recursive
+curl -O https://app8601830087.tgcloud.ai/r/rx580-white-images-fix/sd-cpp/apply.sh
+bash apply.sh</code></pre>
+      <p class="warn">The helper only runs <code>git apply</code> and prints the build command. <a href="apply.sh">Read it first</a> — that is the point. Manual steps are below if you prefer them.</p>
+
       <table>
         <tr><th>Provenance</th><th></th></tr>
         <tr><td>upstream</td><td><code>leejet/stable-diffusion.cpp</code> @ <code>5356982584d5b46a8f5cb0842927aff6443fe174</code></td></tr>
