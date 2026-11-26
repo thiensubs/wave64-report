@@ -3,6 +3,20 @@
 Versions are frozen snapshots, not a work log. Once a chapter is published under a slug, its
 content stops changing — corrections go in a new version with a note here, never silently.
 
+## v1.3 — 2026-11-26
+
+Chapter 13 published: a 27B model in 6 GB — Bonsai 2.5 on an 8 GB RX 580.
+
+- Bonsai 2.5 27B (Qwen 3.8 27B, PTQ1_0 at 1.76 bpw, 5.99 GB) runs entirely in VRAM on an
+  8 GiB AMD RX 580 eGPU under Metal, macOS 15. 13.4 tok/s prompt, 7.9 tok/s generation,
+  7311 MiB at 16k ctx.
+- Two wave64 bugs root-caused and fixed, both invisible on Apple Silicon: the Intel-iGPU
+  routing crash (EXC_ARITHMETIC, `simd_width=8` divide-by-zero) and a hardcoded dispatch-32
+  in the PTQ1_0 extc path that produced garbage on wave64.
+- The fastest PTQ1_0 prompt configuration found by a nine-point `NR`/`NSG` sweep; the shipped
+  defaults (4,2) were already optimal at 13.36 tok/s, with (8,8) collapsing to 5.26.
+- Canonical: `https://app8601830087.tgcloud.ai/r/bonsai-27b-in-6gb/`.
+
 ## v1.2 — 2026-11-04
 
 Packaging for GitHub. No change to any measured claim.
@@ -83,6 +97,16 @@ First published version of **Chapter 1**. Frozen.
 
 ## Unreleased — Chapter 2
 
-llama.cpp on 64-lane hardware. The patch exists
-(`llama-cpp/0001-mul-mv-lanes-per-block.patch`); what is missing is the stock-upstream
-reproduction, captured before and after.
+Draft page at `chapter-2/`. The stock-upstream reproduction is **done**, on a clean
+`llama.cpp-src` checkout at `a7af149a2`:
+
+| format | upstream comment | before patch | after patch |
+|---|---|---|---|
+| q4_0 | 0/121 | 0/121 | 121/121 |
+| q4_1 | 0/99 | — | 99/99 |
+| q5_0 | 0/63 | — | 63/63 |
+| q5_1 | 0/56 | — | 56/56 |
+
+Not proven and stated as such on the page: the 32-lane path was not tested (no Apple GPU);
+the no-op argument is by construction. Not submitted anywhere — llama.cpp's rules make the
+write-up and submission the human's.
