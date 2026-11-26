@@ -88,6 +88,12 @@
     margin-right:6px;vertical-align:-1px;background:var(--blue)}
   .legend .b-best::before{background:var(--green)}
   .legend .b-worst::before{background:var(--red)}
+  .copybar{display:flex;align-items:center;gap:14px;margin:10px 4px 0}
+  .copybar button{font:600 13px -apple-system,sans-serif;color:var(--ink);background:var(--panel);
+    border:1px solid var(--line);border-radius:9px;padding:8px 14px;cursor:pointer}
+  .copybar button:hover{border-color:var(--blue)}
+  .copybar button:disabled{opacity:.55;cursor:default}
+  #copy-msg{font-size:12.5px;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -207,6 +213,11 @@
 </figcaption>
 </figure>
 
+<div class="copybar">
+  <button id="copy-chart" type="button">Copy chart as image</button>
+  <span id="copy-msg" role="status" aria-live="polite"></span>
+</div>
+
 <div class="legend"><span>tested configurations</span><span class="b-best">default (4,2) — fastest</span><span class="b-worst">(8,8) — collapsed</span></div>
 
 <div class="card good">
@@ -240,5 +251,90 @@
 </div>
 
 </div>
+<script>
+(function () {
+  var btn = document.getElementById('copy-chart');
+  var msg = document.getElementById('copy-msg');
+  var figure = btn.closest('.chart-wrap') || document.querySelector('.chart');
+  var svg = figure.querySelector('svg');
+  var caption = figure.querySelector('figcaption').innerText.trim();
+  var SOURCE = 'wave64 · ch.13 — Bonsai 2.5 on an 8 GB RX 580 · app8601830087.tgcloud.ai/r/bonsai-27b-in-6gb';
+
+  var COLORS = { ink: '#e6edf5', dim: '#93a4b8', blue: '#60a5fa', green: '#4ade80', red: '#f87171',
+                 panel: '#131a26', line: '#2a3646', grid: '#1b2531' };
+
+  function svgToImage(scale, done) {
+    var clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('width', svg.viewBox.baseVal.width);
+    clone.setAttribute('height', svg.viewBox.baseVal.height);
+    var bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%'); bg.setAttribute('fill', COLORS.panel);
+    clone.insertBefore(bg, clone.firstChild);
+    var style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    style.textContent =
+      '.axis{stroke:' + COLORS.line + ';stroke-width:1}' +
+      '.grid{stroke:' + COLORS.grid + ';stroke-width:1}' +
+      '.lbl{fill:' + COLORS.dim + ';font:11px -apple-system,Arial,sans-serif}' +
+      '.val{fill:' + COLORS.ink + ';font:11px -apple-system,Arial,sans-serif;font-weight:600}' +
+      '.bar{fill:' + COLORS.blue + '}.bar.best{fill:' + COLORS.green + '}.bar.worst{fill:' + COLORS.red + '}';
+    clone.insertBefore(style, clone.firstChild);
+    var xml = new XMLSerializer().serializeToString(clone);
+    var img = new Image();
+    img.onload = function () { done(img); };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+  }
+
+  function wrap(ctx, text, x, y, maxW, lh) {
+    var words = text.split(/\s+/), line = '', yy = y;
+    for (var i = 0; i < words.length; i++) {
+      var test = line ? line + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, yy); line = words[i]; yy += lh; }
+      else line = test;
+    }
+    if (line) ctx.fillText(line, x, yy);
+    return yy;
+  }
+
+  btn.addEventListener('click', function () {
+    btn.disabled = true; msg.textContent = 'Rendering…';
+    var S = 2, pad = 28, capH = 84, srcH = 30;
+    var vw = svg.viewBox.baseVal.width, vh = svg.viewBox.baseVal.height;
+    var W = vw + pad * 2, H = vh + pad * 2 + capH + srcH;
+    var canvas = document.createElement('canvas');
+    canvas.width = W * S; canvas.height = H * S;
+    var ctx = canvas.getContext('2d'); ctx.scale(S, S);
+    ctx.fillStyle = COLORS.panel; ctx.fillRect(0, 0, W, H);
+
+    svgToImage(S, function (img) {
+      ctx.drawImage(img, pad, pad, vw, vh);
+      ctx.fillStyle = COLORS.ink; ctx.font = '600 15px -apple-system,Arial,sans-serif';
+      var y = wrap(ctx, 'Prompt tok/s by PTQ1_EXTC_NR,NSG — default (4,2) fastest at 13.36', pad, vh + pad + 34, vw, 22);
+      ctx.fillStyle = COLORS.dim; ctx.font = '13px -apple-system,Arial,sans-serif';
+      y = wrap(ctx, caption.replace(/\s+/g, ' '), pad, y + 12, vw, 19);
+      ctx.strokeStyle = COLORS.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad, H - srcH - pad + 10); ctx.lineTo(W - pad, H - srcH - pad + 10); ctx.stroke();
+      ctx.fillStyle = COLORS.dim; ctx.font = '12px -apple-system,Arial,sans-serif';
+      ctx.fillText(SOURCE, pad, H - pad - 4);
+
+      canvas.toBlob(function (blob) {
+        var finish = function (ok, text) { btn.disabled = false; msg.textContent = text;
+          setTimeout(function () { msg.textContent = ''; }, 4000); };
+        if (!blob) return finish(false, 'Render failed.');
+        if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            .then(function () { finish(true, 'Copied — paste into Telegram.'); })
+            .catch(function () { fallback(); });
+        } else fallback();
+        function fallback() {
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = 'bonsai-prompt-sweep.png'; a.click();
+          finish(true, 'Clipboard blocked — downloaded the image instead.');
+        }
+      }, 'image/png');
+    });
+  });
+})();
+</script>
 </body>
 </html>
